@@ -1,5 +1,7 @@
 import os
 import asyncio
+import random
+import string
 import aiohttp
 from datetime import datetime, timedelta
 from threading import Thread
@@ -14,40 +16,39 @@ from pyrogram.types import (
 from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# ==================================================
-# FLASK WEB SERVER (KOYEB HEALTH CHECK FIX)
-# ==================================================
+# ==========================================
+# FLASK WEB SERVER
+# ==========================================
 
-web_app = Flask(__name__)
+web = Flask(__name__)
 
-
-@web_app.route("/")
+@web.route("/")
 def home():
     return "Bot Running Successfully!"
 
-
-@web_app.route("/health")
+@web.route("/health")
 def health():
     return "OK", 200
 
-
 def run_web():
+
     port = int(os.environ.get("PORT", 8000))
-    web_app.run(host="0.0.0.0", port=port)
 
+    web.run(
+        host="0.0.0.0",
+        port=port
+    )
 
-def keep_alive():
-    t = Thread(target=run_web)
-    t.daemon = True
-    t.start()
+Thread(target=run_web).start()
 
-
-# ==================================================
+# ==========================================
 # ENV VARIABLES
-# ==================================================
+# ==========================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 API_ID = int(os.getenv("API_ID"))
+
 API_HASH = os.getenv("API_HASH")
 
 OWNER_ID = int(os.getenv("OWNER_ID"))
@@ -56,14 +57,11 @@ MONGO_URI = os.getenv("MONGO_URI")
 
 VPLINK_API = os.getenv("VPLINK_API")
 
-BASE_URL = os.getenv(
-    "BASE_URL",
-    "https://southern-dorotea-error1234543-b32c9d69.koyeb.app"
-)
+BOT_USERNAME = os.getenv("BOT_USERNAME")
 
-# ==================================================
+# ==========================================
 # CHANNELS
-# ==================================================
+# ==========================================
 
 CHANNELS = [
     {
@@ -76,15 +74,9 @@ CHANNELS = [
     }
 ]
 
-# ==================================================
-# START FLASK
-# ==================================================
-
-keep_alive()
-
-# ==================================================
-# BOT CLIENT
-# ==================================================
+# ==========================================
+# PYROGRAM BOT
+# ==========================================
 
 app = Client(
     "TempAccessBot",
@@ -93,9 +85,9 @@ app = Client(
     api_hash=API_HASH
 )
 
-# ==================================================
+# ==========================================
 # DATABASE
-# ==================================================
+# ==========================================
 
 mongo = AsyncIOMotorClient(MONGO_URI)
 
@@ -103,47 +95,243 @@ db = mongo.temp_access_bot
 
 users = db.users
 
-# ==================================================
+tokens = db.tokens
+
+# ==========================================
 # SCHEDULER
-# ==================================================
+# ==========================================
 
 scheduler = AsyncIOScheduler()
 
-# ==================================================
-# GENERATE SHORTLINK
-# ==================================================
+# ==========================================
+# GENERATE TOKEN
+# ==========================================
 
+def generate_token(length=12):
+
+    return ''.join(
+        random.choices(
+            string.ascii_letters + string.digits,
+            k=length
+        )
+    )
+
+# ==========================================
+# SHORTLINK GENERATOR
+# ==========================================
 
 async def generate_shortlink(user_id):
 
-    verify_url = f"{BASE_URL}/verify?user_id={user_id}"
+    token = generate_token()
+
+    deep_link = (
+        f"https://t.me/"
+        f"{BOT_USERNAME}"
+        f"?start={token}"
+    )
+
+    # SAVE TOKEN
+
+    await tokens.insert_one(
+        {
+            "user_id": user_id,
+            "token": token,
+            "used": False,
+            "created_at": datetime.utcnow()
+        }
+    )
 
     api_url = (
         f"https://vplink.in/api"
         f"?api={VPLINK_API}"
-        f"&url={verify_url}"
+        f"&url={deep_link}"
     )
 
-    async with aiohttp.ClientSession() as session:
+    try:
 
-        async with session.get(api_url) as response:
+        async with aiohttp.ClientSession() as session:
 
-            data = await response.json()
+            async with session.get(api_url) as response:
 
-            print(data)
+                data = await response.json()
 
-            if data.get("status") == "success":
-                return data.get("shortenedUrl")
+                print(data)
+
+                if data.get("status") == "success":
+
+                    return data.get(
+                        "shortenedUrl"
+                    )
+
+    except Exception as e:
+        print(e)
 
     return None
 
-# ==================================================
+# ==========================================
 # START COMMAND
-# ==================================================
-
+# ==========================================
 
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
+
+    data = message.text.split()
+
+    user = message.from_user
+
+    user_id = user.id
+
+    # ======================================
+    # TOKEN VERIFY SYSTEM
+    # ======================================
+
+    if len(data) > 1:
+
+        token = data[1]
+
+        token_data = await tokens.find_one(
+            {
+                "token": token
+            }
+        )
+
+        # INVALID TOKEN
+
+        if not token_data:
+
+            return await message.reply_text(
+                "❌ Invalid verification token"
+            )
+
+        # USED TOKEN
+
+        if token_data.get("used"):
+
+            return await message.reply_text(
+                "❌ This verification link is already used"
+            )
+
+        # TOKEN OWNER CHECK
+
+        if token_data["user_id"] != user_id:
+
+            return await message.reply_text(
+                "❌ This verification link belongs to another user"
+            )
+
+        # TOKEN EXPIRE CHECK
+
+        created_time = token_data["created_at"]
+
+        if (
+            datetime.utcnow() - created_time
+        ).total_seconds() > 300:
+
+            return await message.reply_text(
+                "❌ Verification link expired"
+            )
+
+        # MARK TOKEN USED
+
+        await tokens.update_one(
+            {
+                "token": token
+            },
+            {
+                "$set": {
+                    "used": True
+                }
+            }
+        )
+
+        # CREATE INVITE LINKS
+
+        invite_expire = (
+            datetime.utcnow()
+            + timedelta(minutes=1)
+        )
+
+        final_text = (
+            "✅ Verification Successful\n\n"
+            "📢 Temporary Access Links:\n\n"
+        )
+
+        for channel in CHANNELS:
+
+            try:
+
+                invite = await client.create_chat_invite_link(
+                    chat_id=channel["id"],
+                    expire_date=invite_expire,
+                    member_limit=1
+                )
+
+                final_text += (
+                    f"🔹 {channel['name']}\n"
+                    f"{invite.invite_link}\n\n"
+                )
+
+            except Exception as e:
+
+                print(e)
+
+                final_text += (
+                    f"❌ Failed For "
+                    f"{channel['name']}\n\n"
+                )
+
+        final_text += (
+            "⏰ Links expire in 1 minute\n"
+            "⚠️ Access valid for 12 hours only"
+        )
+
+        expiry_12h = (
+            datetime.utcnow()
+            + timedelta(hours=12)
+        )
+
+        # SAVE USER
+
+        await users.update_one(
+            {
+                "user_id": user_id
+            },
+            {
+                "$set": {
+                    "user_id": user_id,
+                    "verified": True,
+                    "expires_at": expiry_12h
+                }
+            },
+            upsert=True
+        )
+
+        # OWNER ALERT
+
+        owner_text = (
+            f"🚨 New Access Request\n\n"
+            f"👤 User: {user.mention}\n"
+            f"🆔 ID: {user_id}\n\n"
+            f"🔗 tg://user?id={user_id}"
+        )
+
+        try:
+
+            await client.send_message(
+                OWNER_ID,
+                owner_text
+            )
+
+        except:
+            pass
+
+        return await message.reply_text(
+            final_text
+        )
+
+    # ======================================
+    # NORMAL START
+    # ======================================
 
     keyboard = InlineKeyboardMarkup(
         [
@@ -158,7 +346,7 @@ async def start_command(client, message):
 
     text = (
         "🔥 Welcome To Temporary Access Bot\n\n"
-        "✅ Verify using shortlink\n"
+        "✅ Complete shortlink verification\n"
         "✅ Get temporary channel access\n"
         "✅ Access valid for 12 hours\n"
         "✅ Rejoin anytime after expiry\n\n"
@@ -170,17 +358,23 @@ async def start_command(client, message):
         reply_markup=keyboard
     )
 
-# ==================================================
-# GENERATE LINK
-# ==================================================
+# ==========================================
+# GENERATE LINK BUTTON
+# ==========================================
 
-
-@app.on_callback_query(filters.regex("generate_link"))
-async def generate_link(client, callback_query):
+@app.on_callback_query(
+    filters.regex("generate_link")
+)
+async def generate_link(
+    client,
+    callback_query
+):
 
     user_id = callback_query.from_user.id
 
-    shortlink = await generate_shortlink(user_id)
+    shortlink = await generate_shortlink(
+        user_id
+    )
 
     if not shortlink:
 
@@ -192,115 +386,24 @@ async def generate_link(client, callback_query):
         [
             [
                 InlineKeyboardButton(
-                    "✅ Verify Now",
+                    "🔗 Verify & Get Access",
                     url=shortlink
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔄 I Have Verified",
-                    callback_data="verified"
                 )
             ]
         ]
     )
 
     await callback_query.message.reply_text(
-        "🔐 Complete verification then click below.",
+        (
+            "🔐 Complete shortlink verification.\n\n"
+            "⚠️ Verification link valid for 5 minutes."
+        ),
         reply_markup=keyboard
     )
 
-# ==================================================
-# VERIFIED USER
-# ==================================================
-
-
-@app.on_callback_query(filters.regex("verified"))
-async def verified_user(client, callback_query):
-
-    user = callback_query.from_user
-
-    user_id = user.id
-
-    invite_expire = datetime.utcnow() + timedelta(minutes=1)
-
-    final_text = (
-        "✅ Verification Successful\n\n"
-        "📢 Temporary Access Links:\n\n"
-    )
-
-    for channel in CHANNELS:
-
-        try:
-
-            invite = await client.create_chat_invite_link(
-                chat_id=channel["id"],
-                expire_date=invite_expire,
-                member_limit=1
-            )
-
-            final_text += (
-                f"🔹 {channel['name']}\n"
-                f"{invite.invite_link}\n\n"
-            )
-
-        except Exception as e:
-
-            print(e)
-
-            final_text += (
-                f"❌ Failed to generate for "
-                f"{channel['name']}\n\n"
-            )
-
-    final_text += (
-        "⏰ Links expire in 1 minute\n"
-        "⚠️ Access valid only for 12 hours"
-    )
-
-    expiry_12h = datetime.utcnow() + timedelta(hours=12)
-
-    await users.update_one(
-        {
-            "user_id": user_id
-        },
-        {
-            "$set": {
-                "user_id": user_id,
-                "verified": True,
-                "expires_at": expiry_12h
-            }
-        },
-        upsert=True
-    )
-
-    # OWNER NOTIFICATION
-
-    owner_text = (
-        f"🚨 New Access Request\n\n"
-        f"👤 User: {user.mention}\n"
-        f"🆔 ID: {user_id}\n\n"
-        f"🔗 tg://user?id={user_id}"
-    )
-
-    try:
-
-        await client.send_message(
-            OWNER_ID,
-            owner_text
-        )
-
-    except:
-        pass
-
-    await callback_query.message.reply_text(
-        final_text
-    )
-
-# ==================================================
+# ==========================================
 # REMOVE EXPIRED USERS
-# ==================================================
-
+# ==========================================
 
 async def remove_expired_users():
 
@@ -342,14 +445,14 @@ async def remove_expired_users():
             except Exception as e:
                 print(e)
 
-        # SEND MESSAGE
+        # MESSAGE USER
 
         try:
 
             await app.send_message(
                 user_id,
                 (
-                    "⏰ Your access has expired\n\n"
+                    "⏰ Your access expired.\n\n"
                     "🔄 Generate a new verification "
                     "link to join again."
                 )
@@ -371,21 +474,11 @@ async def remove_expired_users():
             }
         )
 
-# ==================================================
-# STARTUP EVENT
-# ==================================================
+# ==========================================
+# STARTUP
+# ==========================================
 
-
-@app.on_message(filters.command("ping"))
-async def ping(_, message):
-    await message.reply_text("🏓 Pong!")
-
-# ==================================================
-# MAIN START
-# ==================================================
-
-
-async def main():
+async def startup():
 
     scheduler.add_job(
         remove_expired_users,
@@ -395,20 +488,26 @@ async def main():
 
     scheduler.start()
 
+    print("Scheduler Started!")
+
+# ==========================================
+# START BOT
+# ==========================================
+
+async def main():
+
+    await startup()
+
     print("Bot Started Successfully!")
 
     await app.start()
 
-    print("Pyrogram Client Started!")
+    from pyrogram.idle import idle
 
-    await asyncio.Event().wait()
+    await idle()
 
-# ==================================================
-# RUN BOT
-# ==================================================
+# ==========================================
+# RUN
+# ==========================================
 
-if __name__ == "__main__":
-
-    loop = asyncio.get_event_loop()
-
-    loop.run_until_complete(main())
+app.run()
