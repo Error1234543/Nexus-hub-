@@ -1,6 +1,9 @@
+
 pyrogram
 TgCrypto
 motor
 aiohttp
 apscheduler
+flask
+gunicorn
 python-dotenv
