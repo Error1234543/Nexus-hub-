@@ -30,16 +30,12 @@ scheduler = AsyncIOScheduler()
 
 CHANNELS = [
     {
-        "name": "Physics Channel",
-        "id": -1001234567890
+        "name": "NEET FULL BATCH 1 GUJARATI",
+        "id": -1002703950742
     },
     {
-        "name": "Biology Channel",
-        "id": -1001234567891
-    },
-    {
-        "name": "Chemistry Channel",
-        "id": -1001234567892
+        "name": "NEET FULL BATCH 2 GUJARATI",
+        "id": -1003870505207
     }
 ]
 
