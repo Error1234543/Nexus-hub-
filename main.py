@@ -17,7 +17,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # ==========================================
-# FLASK WEB SERVER
+# FLASK SERVER
 # ==========================================
 
 web = Flask(__name__)
@@ -79,7 +79,7 @@ CHANNELS = [
 ]
 
 # ==========================================
-# PYROGRAM BOT
+# BOT CLIENT
 # ==========================================
 
 app = Client(
@@ -161,7 +161,7 @@ async def generate_shortlink(user_id):
 
                 print(data)
 
-                # DEBUG MESSAGE
+                # DEBUG TO OWNER
 
                 try:
                     await app.send_message(
@@ -171,13 +171,19 @@ async def generate_shortlink(user_id):
                 except:
                     pass
 
-                # FIXED CHECK
+                # ALL POSSIBLE RESPONSES
 
-                if "shortenedUrl" in data:
+                if data.get("shortenedUrl"):
+                    return data.get("shortenedUrl")
 
-                    return data.get(
-                        "shortenedUrl"
-                    )
+                if data.get("shortened_url"):
+                    return data.get("shortened_url")
+
+                if data.get("short_url"):
+                    return data.get("short_url")
+
+                if data.get("url"):
+                    return data.get("url")
 
     except Exception as e:
 
@@ -207,7 +213,7 @@ async def start_command(client, message):
     user_id = user.id
 
     # ======================================
-    # TOKEN VERIFY SYSTEM
+    # VERIFY TOKEN SYSTEM
     # ======================================
 
     if len(data) > 1:
@@ -236,7 +242,7 @@ async def start_command(client, message):
                 "❌ This verification link is already used"
             )
 
-        # TOKEN OWNER CHECK
+        # OWNER CHECK
 
         if token_data["user_id"] != user_id:
 
@@ -244,7 +250,7 @@ async def start_command(client, message):
                 "❌ This verification link belongs to another user"
             )
 
-        # TOKEN EXPIRE CHECK
+        # EXPIRE CHECK
 
         created_time = token_data["created_at"]
 
@@ -256,7 +262,7 @@ async def start_command(client, message):
                 "❌ Verification link expired"
             )
 
-        # MARK TOKEN USED
+        # MARK USED
 
         await tokens.update_one(
             {
@@ -307,7 +313,7 @@ async def start_command(client, message):
 
         final_text += (
             "⏰ Links expire in 1 minute\n"
-            "⚠️ Access valid only for 12 hours"
+            "⚠️ Access valid for 12 hours only"
         )
 
         expiry_12h = (
@@ -331,7 +337,7 @@ async def start_command(client, message):
             upsert=True
         )
 
-        # OWNER ALERT
+        # OWNER MESSAGE
 
         owner_text = (
             f"🚨 New Access Request\n\n"
@@ -397,8 +403,6 @@ async def generate_link(
 
     user_id = callback_query.from_user.id
 
-    # LOADING MESSAGE
-
     await callback_query.answer(
         "⏳ Generating verification link..."
     )
@@ -457,7 +461,7 @@ async def remove_expired_users():
 
             try:
 
-                # BAN USER
+                # BAN
 
                 await app.ban_chat_member(
                     channel["id"],
@@ -466,7 +470,7 @@ async def remove_expired_users():
 
                 await asyncio.sleep(1)
 
-                # UNBAN USER
+                # UNBAN
 
                 await app.unban_chat_member(
                     channel["id"],
@@ -492,7 +496,7 @@ async def remove_expired_users():
         except:
             pass
 
-        # UPDATE DATABASE
+        # UPDATE DB
 
         await users.update_one(
             {
@@ -522,23 +526,18 @@ async def startup():
     print("Scheduler Started!")
 
 # ==========================================
-# START BOT
+# BOT START
 # ==========================================
 
-async def main():
+@app.on_message(filters.command("ping"))
+async def ping(_, message):
 
-    await startup()
-
-    print("Bot Started Successfully!")
-
-    await app.start()
-
-    from pyrogram.idle import idle
-
-    await idle()
+    await message.reply_text("🏓 Pong!")
 
 # ==========================================
-# RUN
+# RUN BOT
 # ==========================================
+
+print("Bot Started Successfully!")
 
 app.run()
