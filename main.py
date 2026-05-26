@@ -57,7 +57,11 @@ MONGO_URI = os.getenv("MONGO_URI")
 
 VPLINK_API = os.getenv("VPLINK_API")
 
-BOT_USERNAME = os.getenv("BOT_USERNAME")
+# ==========================================
+# BOT USERNAME
+# ==========================================
+
+BOT_USERNAME = "Jetxcntbot"
 
 # ==========================================
 # CHANNELS
@@ -104,7 +108,7 @@ tokens = db.tokens
 scheduler = AsyncIOScheduler()
 
 # ==========================================
-# GENERATE TOKEN
+# TOKEN GENERATOR
 # ==========================================
 
 def generate_token(length=12):
@@ -157,14 +161,35 @@ async def generate_shortlink(user_id):
 
                 print(data)
 
-                if data.get("status") == "success":
+                # DEBUG MESSAGE
+
+                try:
+                    await app.send_message(
+                        OWNER_ID,
+                        f"API RESPONSE:\n\n{data}"
+                    )
+                except:
+                    pass
+
+                # FIXED CHECK
+
+                if "shortenedUrl" in data:
 
                     return data.get(
                         "shortenedUrl"
                     )
 
     except Exception as e:
+
         print(e)
+
+        try:
+            await app.send_message(
+                OWNER_ID,
+                f"SHORTLINK ERROR:\n\n{e}"
+            )
+        except:
+            pass
 
     return None
 
@@ -282,7 +307,7 @@ async def start_command(client, message):
 
         final_text += (
             "⏰ Links expire in 1 minute\n"
-            "⚠️ Access valid for 12 hours only"
+            "⚠️ Access valid only for 12 hours"
         )
 
         expiry_12h = (
@@ -371,6 +396,12 @@ async def generate_link(
 ):
 
     user_id = callback_query.from_user.id
+
+    # LOADING MESSAGE
+
+    await callback_query.answer(
+        "⏳ Generating verification link..."
+    )
 
     shortlink = await generate_shortlink(
         user_id
