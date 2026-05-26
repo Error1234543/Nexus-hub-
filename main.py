@@ -58,7 +58,7 @@ VPLINK_API = os.getenv("VPLINK_API")
 
 BASE_URL = os.getenv(
     "BASE_URL",
-    "https://google.com"
+    "https://southern-dorotea-error1234543-b32c9d69.koyeb.app"
 )
 
 # ==================================================
